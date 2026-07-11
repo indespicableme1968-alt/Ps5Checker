@@ -169,19 +169,39 @@ RETAILER_SELECTORS: dict[str, dict[str, list[str]]] = {
             "[class*='Price']",
         ],
     },
-    "shopatsc": {
-        "positive": [
-            "button:has-text('Add to cart')",
-            "button:has-text('Buy now')",
-            "button:has-text('Buy Now')",
-        ],
-        "negative": [
-            "button:has-text('Sold out')",
-            "button:has-text('Notify me')",
-            "text=Out of stock",
-        ],
-        "price": ["[class*='price']"],
-    },
+     "shopatsc": {
+     "positive": [
++        "button:has-text('Add to Cart')",
+         "button:has-text('Add to cart')",
+-        "button:has-text('Buy now')",
+         "button:has-text('Buy Now')",
++        "button:has-text('Buy now')",
++        "a:has-text('Add to Cart')",
++        "a:has-text('Buy Now')",
++        "[role='button']:has-text('Add to Cart')",
++        "[role='button']:has-text('Buy Now')",
++        "input[value*='Add to Cart' i]",
++        "input[value*='Buy Now' i]",
+     ],
+     "negative": [
+-        "button:has-text('Sold out')",
+-        "button:has-text('Notify me')",
+-        "text=Out of stock",
++        "button:has-text('Notify Me')",
++        "a:has-text('Notify Me')",
++        "[role='button']:has-text('Notify Me')",
++        "input[value*='Notify Me' i]",
++        "button:has-text('Sold Out')",
++        "a:has-text('Sold Out')",
++        "[role='button']:has-text('Sold Out')",
++        "text=/^Out of Stock$/i",
+     ],
+-    "price": ["[class*='price']"],
++    "price": [
++        "[class*='price']",
++        "[class*='Price']",
++    ],
+ },
     "vijay": {
         "positive": [
             "button:has-text('Add to Cart')",
@@ -631,23 +651,34 @@ async def inspect_loaded_product_page(page: Page, product: dict[str, Any], navig
     structured_status, structured_price = await read_json_ld(page)
     price = structured_price or await extract_price(page, text, product)
 
-    # Strongest signal: an enabled purchase control on the product page.
-    if positive and within_price_range(price, product):
-        label = positive[1] or positive[0]
-        return CheckResult(
-            key, retailer, name, StockStatus.IN_STOCK, url,
-            f'Active purchase control detected: "{label}" ({navigation_detail})',
-            price=price, confidence="high",
-        )
+    # An explicit unavailable control overrides other purchase controls.
+# Retailer pages may contain unrelated Add to Cart buttons.
+if negative:
+    label = negative[1] or negative[0]
+    return CheckResult(
+        key,
+        retailer,
+        name,
+        StockStatus.OUT_OF_STOCK,
+        url,
+        f'Unavailable control detected: "{label}" ({navigation_detail})',
+        price=price,
+        confidence="high",
+    )
 
-    # Explicit unavailable controls override stale structured data.
-    if negative:
-        label = negative[1] or negative[0]
-        return CheckResult(
-            key, retailer, name, StockStatus.OUT_OF_STOCK, url,
-            f'Unavailable control detected: "{label}" ({navigation_detail})',
-            price=price, confidence="high",
-        )
+# Mark in stock only when no unavailable control is visible.
+if positive and within_price_range(price, product):
+    label = positive[1] or positive[0]
+    return CheckResult(
+        key,
+        retailer,
+        name,
+        StockStatus.IN_STOCK,
+        url,
+        f'Active purchase control detected: "{label}" ({navigation_detail})',
+        price=price,
+        confidence="high",
+    )
 
     # Structured data is useful, but only after checking visible controls.
     if structured_status is not None:
