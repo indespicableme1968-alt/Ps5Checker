@@ -13,12 +13,12 @@
   },
   "shopatsc-digital": {
     "last_alerted_fingerprint": "IN_STOCK|https://shopatsc.com/products/playstation-5-digital-edition",
-    "status": "IN_STOCK",
+    "status": "OUT_OF_STOCK",
     "url": "https://shopatsc.com/products/playstation-5-digital-edition"
   },
   "shopatsc-disc": {
     "last_alerted_fingerprint": "IN_STOCK|https://shopatsc.com/products/playstation-5-standard-edition",
-    "status": "IN_STOCK",
+    "status": "OUT_OF_STOCK",
     "url": "https://shopatsc.com/products/playstation-5-standard-edition"
   },
   "vijaysales-digital": {
