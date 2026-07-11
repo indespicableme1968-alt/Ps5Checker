@@ -2,7 +2,7 @@ name: Check PS5 stock
 
 "on":
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "7,22,37,52 * * * *"
 
   workflow_dispatch:
     inputs:
