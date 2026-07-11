@@ -1,4 +1,8 @@
 {
+  "amazon-digital": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://www.amazon.in/dp/B0CY5QW186"
+  },
   "gamestheshop-digital": {
     "status": "OUT_OF_STOCK",
     "url": "https://www.gamestheshop.com/product/0a3c6810-ed3d-4bec-8e98-48a2ed5208fd?variant=1035149c-6626-4da2-a6f0-18fe56ce94e0"
@@ -8,11 +12,13 @@
     "url": "https://www.gamestheshop.com/product/1fe01712-6e2b-49b0-9f93-f9670b4ec2a8?variant=a49b6fe6-dae2-4242-bcc6-5ed45e8ab52c"
   },
   "shopatsc-digital": {
-    "status": "OUT_OF_STOCK",
+    "last_alerted_fingerprint": "IN_STOCK|https://shopatsc.com/products/playstation-5-digital-edition",
+    "status": "IN_STOCK",
     "url": "https://shopatsc.com/products/playstation-5-digital-edition"
   },
   "shopatsc-disc": {
-    "status": "OUT_OF_STOCK",
+    "last_alerted_fingerprint": "IN_STOCK|https://shopatsc.com/products/playstation-5-standard-edition",
+    "status": "IN_STOCK",
     "url": "https://shopatsc.com/products/playstation-5-standard-edition"
   },
   "vijaysales-digital": {
