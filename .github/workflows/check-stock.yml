@@ -1,1 +1,69 @@
+name: Check PS5 stock
 
+"on":
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+
+  workflow_dispatch:
+    inputs:
+      send_test_notification:
+        description: "Send a Telegram test message before checking"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ps5-stock-checker
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Chromium
+        run: python -m playwright install chromium
+
+      - name: Check stock
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DELIVERY_PINCODE: "575006"
+          SEND_TEST_NOTIFICATION: ${{ inputs.send_test_notification || 'false' }}
+        run: python stock_checker.py
+
+      - name: Save stock state
+        if: always()
+        run: |
+          if git diff --quiet -- state.json; then
+            echo "No stock-state change to save."
+            exit 0
+          fi
+
+          git config user.name "ps5-stock-checker[bot]"
+          git config user.email "ps5-stock-checker[bot]@users.noreply.github.com"
+          git add state.json
+          git commit -m "Update PS5 stock state [skip ci]"
+          git push
