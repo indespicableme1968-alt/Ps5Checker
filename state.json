@@ -1,1 +1,26 @@
-{}
+{
+  "gamestheshop-digital": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://www.gamestheshop.com/product/0a3c6810-ed3d-4bec-8e98-48a2ed5208fd?variant=1035149c-6626-4da2-a6f0-18fe56ce94e0"
+  },
+  "gamestheshop-disc": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://www.gamestheshop.com/product/1fe01712-6e2b-49b0-9f93-f9670b4ec2a8?variant=a49b6fe6-dae2-4242-bcc6-5ed45e8ab52c"
+  },
+  "shopatsc-digital": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://shopatsc.com/products/playstation-5-digital-edition"
+  },
+  "shopatsc-disc": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://shopatsc.com/products/playstation-5-standard-edition"
+  },
+  "vijaysales-digital": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://www.vijaysales.com/p/254870/sony-playstationr5-digital-edition-console-video-game-825gb-ps5r-slim"
+  },
+  "vijaysales-disc": {
+    "status": "OUT_OF_STOCK",
+    "url": "https://www.vijaysales.com/p/252606/sony-playstationr5-disc-sa-e-edition-console-video-game-ps5r-slim"
+  }
+}
