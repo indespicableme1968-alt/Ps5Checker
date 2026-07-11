@@ -1,0 +1,171 @@
+{
+  "products": [
+    {
+      "key": "amazon-disc",
+      "retailer": "Amazon India",
+      "name": "PS5 Slim Disc Edition",
+      "mode": "product",
+      "url": "https://www.amazon.in/dp/B0CY5HVDS2",
+      "apply_pincode": true,
+      "min_price": 30000,
+      "max_price": 65000,
+      "enabled": true
+    },
+    {
+      "key": "amazon-digital",
+      "retailer": "Amazon India",
+      "name": "PS5 Slim Digital Edition",
+      "mode": "product",
+      "url": "https://www.amazon.in/dp/B0CY5QW186",
+      "apply_pincode": true,
+      "min_price": 25000,
+      "max_price": 60000,
+      "enabled": true
+    },
+    {
+      "key": "flipkart-all",
+      "retailer": "Flipkart",
+      "name": "Any PS5 console listing",
+      "mode": "search",
+      "url": "https://www.flipkart.com/search?q=sony%20playstation%205%20console",
+      "apply_pincode": false,
+      "include_all": [
+        "playstation",
+        "5"
+      ],
+      "include_any": [
+        "console",
+        "slim",
+        "digital edition",
+        "disc edition"
+      ],
+      "exclude": [
+        "controller",
+        "gamepad",
+        "cover",
+        "skin",
+        "stand",
+        "headset",
+        "charging station",
+        "cooling fan",
+        "replacement",
+        "pre-owned"
+      ],
+      "require_price": true,
+      "min_price": 25000,
+      "max_price": 65000,
+      "max_matches": 5,
+      "enabled": true
+    },
+    {
+      "key": "shopatsc-disc",
+      "retailer": "Sony ShopAtSC",
+      "name": "PS5 Standard Edition",
+      "mode": "product",
+      "url": "https://shopatsc.com/products/playstation-5-standard-edition",
+      "apply_pincode": false,
+      "min_price": 30000,
+      "max_price": 65000,
+      "enabled": true
+    },
+    {
+      "key": "shopatsc-digital",
+      "retailer": "Sony ShopAtSC",
+      "name": "PS5 Digital Edition",
+      "mode": "product",
+      "url": "https://shopatsc.com/products/playstation-5-digital-edition",
+      "apply_pincode": false,
+      "min_price": 25000,
+      "max_price": 60000,
+      "enabled": true
+    },
+    {
+      "key": "croma-disc",
+      "retailer": "Croma",
+      "name": "PS5 Slim Disc Edition",
+      "mode": "product",
+      "url": "https://www.croma.com/sony-playstation-5-slim-1tb-ssd-gaming-console-white-/p/305985",
+      "apply_pincode": true,
+      "min_price": 30000,
+      "max_price": 65000,
+      "enabled": true
+    },
+    {
+      "key": "croma-digital",
+      "retailer": "Croma",
+      "name": "PS5 Slim Digital Edition",
+      "mode": "product",
+      "url": "https://www.croma.com/sony-playstation-5-slim-1tb-ssd-cfi-2008b01x-white-/p/305987",
+      "apply_pincode": true,
+      "min_price": 25000,
+      "max_price": 60000,
+      "enabled": true
+    },
+    {
+      "key": "reliance-disc",
+      "retailer": "Reliance Digital",
+      "name": "PS5 Slim Disc Edition",
+      "mode": "product",
+      "url": "https://www.reliancedigital.in/product/sony-playstation-ps5-slim-console-luh1rv-7537998",
+      "apply_pincode": true,
+      "min_price": 30000,
+      "max_price": 65000,
+      "enabled": true
+    },
+    {
+      "key": "reliance-digital",
+      "retailer": "Reliance Digital",
+      "name": "PS5 Digital Edition",
+      "mode": "product",
+      "url": "https://www.reliancedigital.in/product/sony-playstation-5-digital-edition-console",
+      "apply_pincode": true,
+      "min_price": 25000,
+      "max_price": 60000,
+      "enabled": true
+    },
+    {
+      "key": "vijaysales-disc",
+      "retailer": "Vijay Sales",
+      "name": "PS5 Slim Disc Edition",
+      "mode": "product",
+      "url": "https://www.vijaysales.com/p/252606/sony-playstationr5-disc-sa-e-edition-console-video-game-ps5r-slim",
+      "apply_pincode": true,
+      "min_price": 30000,
+      "max_price": 65000,
+      "enabled": true
+    },
+    {
+      "key": "vijaysales-digital",
+      "retailer": "Vijay Sales",
+      "name": "PS5 Slim Digital Edition",
+      "mode": "product",
+      "url": "https://www.vijaysales.com/p/254870/sony-playstationr5-digital-edition-console-video-game-825gb-ps5r-slim",
+      "apply_pincode": true,
+      "min_price": 25000,
+      "max_price": 60000,
+      "enabled": true
+    },
+    {
+      "key": "gamestheshop-disc",
+      "retailer": "Games The Shop",
+      "name": "PS5 Slim Disc Edition",
+      "mode": "product",
+      "url": "https://www.gamestheshop.com/product/1fe01712-6e2b-49b0-9f93-f9670b4ec2a8?variant=a49b6fe6-dae2-4242-bcc6-5ed45e8ab52c",
+      "apply_pincode": false,
+      "min_price": 30000,
+      "max_price": 65000,
+      "enabled": true
+    },
+    {
+      "key": "gamestheshop-digital",
+      "retailer": "Games The Shop",
+      "name": "PS5 Slim Digital Edition",
+      "mode": "product",
+      "url": "https://www.gamestheshop.com/product/0a3c6810-ed3d-4bec-8e98-48a2ed5208fd?variant=1035149c-6626-4da2-a6f0-18fe56ce94e0",
+      "apply_pincode": false,
+      "min_price": 25000,
+      "max_price": 60000,
+      "enabled": true
+    }
+  ]
+}
