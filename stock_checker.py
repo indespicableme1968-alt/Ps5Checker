@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Reliable PS5 stock checker for Indian retailers.
 
-This version is designed for GitHub Actions and improves the original checker by:
-- continuing to inspect partially loaded pages after navigation timeouts
-- preserving line breaks in page text so stock phrases can be detected
-- using retailer-specific selectors before generic detection
-- checking Flipkart result links instead of treating a search result as stock
-- blocking only images/fonts/media to reduce page load time
-- retrying uncertain product pages once
-- avoiding false alerts when a site blocks automation or changes its page
-- treating visible unavailable controls such as "Notify Me" as stronger than
-  unrelated or hidden purchase controls elsewhere on the page
+Designed for GitHub Actions. It checks product/search pages, applies the
+configured delivery pincode where possible, and sends Telegram alerts only
+when the product has a reliable purchase signal.
+
+Important Flipkart rule:
+A Flipkart product is never marked IN_STOCK unless delivery to the configured
+pincode is positively confirmed. Text such as "Not deliverable at your
+location" overrides Buy Now/Add to Cart buttons and structured stock data.
 """
 
 from __future__ import annotations
@@ -48,7 +46,10 @@ NOTIFY_OUT_OF_STOCK = os.getenv("NOTIFY_OUT_OF_STOCK", "false").lower() == "true
 SEND_TEST_NOTIFICATION = os.getenv("SEND_TEST_NOTIFICATION", "false").lower() == "true"
 MAX_SEARCH_RESULTS_TO_VERIFY = int(os.getenv("MAX_SEARCH_RESULTS_TO_VERIFY", "3"))
 
-PRICE_PATTERN = re.compile(r"(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:\.\d{1,2})?)", re.I)
+PRICE_PATTERN = re.compile(
+    r"(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
+    re.I,
+)
 
 BLOCKED_PATTERNS = (
     "captcha",
@@ -96,6 +97,35 @@ IN_STOCK_TEXT_PATTERNS = (
     "delivery available",
     "standard delivery available",
     "available to order",
+)
+
+# Delivery-blocking text must override purchase buttons. This is especially
+# important on Flipkart, where Buy Now may remain visible even when the item
+# cannot be delivered to the selected location.
+DELIVERY_UNAVAILABLE_PATTERNS = (
+    "not deliverable at your location",
+    "not deliverable to your location",
+    "not deliverable to this location",
+    "not deliverable",
+    "delivery not available at your location",
+    "delivery not available to your location",
+    "delivery not available",
+    "currently not deliverable",
+    "cannot be delivered to your location",
+    "cannot deliver to your location",
+    "not available for delivery",
+    "service unavailable at your location",
+)
+
+DELIVERY_AVAILABLE_PATTERNS = (
+    "delivery by",
+    "delivered by",
+    "free delivery",
+    "available for delivery",
+    "delivery available",
+    "standard delivery available",
+    "get it by",
+    "usually delivered",
 )
 
 # Retailer-specific selectors are checked before generic text/button detection.
@@ -298,7 +328,11 @@ def retailer_key(retailer: str, url: str = "") -> str:
     return "generic"
 
 
-def parse_price(text: str, minimum: float = 20_000, maximum: float = 100_000) -> float | None:
+def parse_price(
+    text: str,
+    minimum: float = 20_000,
+    maximum: float = 100_000,
+) -> float | None:
     values: list[float] = []
     for match in PRICE_PATTERN.finditer(text or ""):
         try:
@@ -317,7 +351,9 @@ def format_price(price: float | None) -> str:
 def within_price_range(price: float | None, product: dict[str, Any]) -> bool:
     if price is None:
         return True
-    return float(product.get("min_price", 20_000)) <= price <= float(product.get("max_price", 100_000))
+    return float(product.get("min_price", 20_000)) <= price <= float(
+        product.get("max_price", 100_000)
+    )
 
 
 def contains_pattern(text: str, patterns: tuple[str, ...]) -> str | None:
@@ -329,11 +365,11 @@ def contains_pattern(text: str, patterns: tuple[str, ...]) -> str | None:
 
 
 def line_pattern(text: str, patterns: tuple[str, ...]) -> str | None:
-    """Find short, stock-related lines while preserving the page's line breaks."""
+    """Find short relevant lines while preserving the page's line breaks."""
     for raw_line in re.split(r"[\r\n]+", text):
         line = clean_text(raw_line)
         lowered = line.lower()
-        if not line or len(line) > 180:
+        if not line or len(line) > 220:
             continue
         for pattern in patterns:
             if pattern in lowered:
@@ -363,16 +399,24 @@ async def dismiss_popups(page: Page) -> None:
 
 async def body_text(page: Page) -> str:
     try:
-        # Do not call clean_text here. Preserving new lines is important.
+        # Keep line breaks because delivery/stock phrases are easier to match.
         return await page.locator("body").inner_text(timeout=5000)
     except Exception:
         return ""
 
 
-async def best_effort_goto(page: Page, url: str, timeout_ms: int = PAGE_TIMEOUT_MS) -> tuple[bool, str]:
+async def best_effort_goto(
+    page: Page,
+    url: str,
+    timeout_ms: int = PAGE_TIMEOUT_MS,
+) -> tuple[bool, str]:
     """Navigate without discarding a partially loaded but usable page."""
     try:
-        response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        response = await page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=timeout_ms,
+        )
         status = response.status if response else 0
         return True, f"HTTP {status}" if status else "loaded"
     except PlaywrightTimeoutError:
@@ -380,9 +424,12 @@ async def best_effort_goto(page: Page, url: str, timeout_ms: int = PAGE_TIMEOUT_
         if len(clean_text(text)) >= 120:
             return True, "navigation timed out, but partial page content was available"
 
-    # One lighter retry. `commit` succeeds as soon as the server responds.
     try:
-        response = await page.goto(url, wait_until="commit", timeout=max(12_000, timeout_ms // 2))
+        response = await page.goto(
+            url,
+            wait_until="commit",
+            timeout=max(12_000, timeout_ms // 2),
+        )
         await page.wait_for_timeout(2500)
         status = response.status if response else 0
         text = await body_text(page)
@@ -403,7 +450,9 @@ async def set_amazon_pincode(page: Page, pincode: str) -> bool:
         field = page.locator("#GLUXZipUpdateInput").first
         await field.wait_for(state="visible", timeout=4000)
         await field.fill(pincode)
-        await page.locator("#GLUXZipUpdate input[type='submit'], #GLUXZipUpdate").first.click(timeout=2500)
+        await page.locator(
+            "#GLUXZipUpdate input[type='submit'], #GLUXZipUpdate"
+        ).first.click(timeout=2500)
         await page.wait_for_timeout(1800)
         return True
     except Exception:
@@ -413,46 +462,61 @@ async def set_amazon_pincode(page: Page, pincode: str) -> bool:
 async def set_generic_pincode(page: Page, pincode: str) -> bool:
     selectors = [
         "input[placeholder*='pincode' i]",
+        "input[placeholder*='pin code' i]",
         "input[aria-label*='pincode' i]",
+        "input[aria-label*='pin code' i]",
         "input[name*='pincode' i]",
         "input[id*='pincode' i]",
         "input[placeholder*='postal' i]",
     ]
+
     for selector in selectors:
         locator = page.locator(selector)
         try:
             count = min(await locator.count(), 4)
         except Exception:
             continue
+
         for index in range(count):
             field = locator.nth(index)
             try:
                 if not await field.is_visible(timeout=350):
                     continue
+
                 await field.fill(pincode, timeout=1500)
-                container = field.locator("xpath=ancestor::*[self::form or self::div][1]")
+                container = field.locator(
+                    "xpath=ancestor::*[self::form or self::div][1]"
+                )
                 button = container.locator(
-                    "button:has-text('Apply'), button:has-text('Check'), "
-                    "button:has-text('Update'), button:has-text('Submit')"
+                    "button:has-text('Apply'), "
+                    "button:has-text('Check'), "
+                    "button:has-text('Update'), "
+                    "button:has-text('Submit')"
                 ).first
+
                 if await button.count() and await button.is_visible(timeout=350):
                     await button.click(timeout=1500)
                 else:
                     await field.press("Enter")
-                await page.wait_for_timeout(1500)
+
+                await page.wait_for_timeout(2200)
                 return True
             except Exception:
                 continue
+
     return False
 
 
 async def apply_pincode(page: Page, product: dict[str, Any]) -> bool:
     if not product.get("apply_pincode", True) or not PINCODE:
         return False
+
     key = retailer_key(product.get("retailer", ""), product.get("url", ""))
+    pincode = str(product.get("pincode") or PINCODE)
+
     if key == "amazon":
-        return await set_amazon_pincode(page, str(product.get("pincode") or PINCODE))
-    return await set_generic_pincode(page, str(product.get("pincode") or PINCODE))
+        return await set_amazon_pincode(page, pincode)
+    return await set_generic_pincode(page, pincode)
 
 
 async def locator_text(locator: Locator) -> str:
@@ -479,7 +543,9 @@ async def first_visible_selector(
             if require_enabled and await locator.is_disabled(timeout=300):
                 continue
             text = await locator_text(locator)
-            if required_patterns and not any(pattern in text.lower() for pattern in required_patterns):
+            if required_patterns and not any(
+                pattern in text.lower() for pattern in required_patterns
+            ):
                 continue
             return selector, text
         except Exception:
@@ -487,7 +553,11 @@ async def first_visible_selector(
     return None
 
 
-async def generic_visible_control(page: Page, patterns: tuple[str, ...], require_enabled: bool) -> str | None:
+async def generic_visible_control(
+    page: Page,
+    patterns: tuple[str, ...],
+    require_enabled: bool,
+) -> str | None:
     try:
         controls = page.locator(
             "button, input[type='submit'], input[type='button'], "
@@ -517,15 +587,23 @@ def availability_from_json(value: Any) -> tuple[StockStatus | None, float | None
 
     def visit(node: Any) -> None:
         nonlocal found_status, found_price
+
         if isinstance(node, dict):
             availability = node.get("availability")
             if isinstance(availability, str):
                 lowered = availability.lower()
-                if any(token in lowered for token in ("instock", "limitedavailability", "preorder")):
+                if any(
+                    token in lowered
+                    for token in ("instock", "limitedavailability", "preorder")
+                ):
                     found_status = StockStatus.IN_STOCK
-                elif any(token in lowered for token in ("outofstock", "soldout", "discontinued")):
+                elif any(
+                    token in lowered
+                    for token in ("outofstock", "soldout", "discontinued")
+                ):
                     if found_status is None:
                         found_status = StockStatus.OUT_OF_STOCK
+
             for price_key in ("price", "lowPrice", "highPrice"):
                 raw_price = node.get(price_key)
                 if raw_price is not None and found_price is None:
@@ -535,8 +613,10 @@ def availability_from_json(value: Any) -> tuple[StockStatus | None, float | None
                         continue
                     if 20_000 <= candidate <= 100_000:
                         found_price = candidate
+
             for child in node.values():
                 visit(child)
+
         elif isinstance(node, list):
             for child in node:
                 visit(child)
@@ -547,28 +627,38 @@ def availability_from_json(value: Any) -> tuple[StockStatus | None, float | None
 
 async def read_json_ld(page: Page) -> tuple[StockStatus | None, float | None]:
     try:
-        scripts = await page.locator("script[type='application/ld+json']").all_text_contents()
+        scripts = await page.locator(
+            "script[type='application/ld+json']"
+        ).all_text_contents()
     except Exception:
         return None, None
 
     best_status: StockStatus | None = None
     best_price: float | None = None
+
     for script in scripts:
         try:
             parsed = json.loads(script)
         except json.JSONDecodeError:
             continue
+
         status, price = availability_from_json(parsed)
         if status == StockStatus.IN_STOCK:
             best_status = status
         elif status == StockStatus.OUT_OF_STOCK and best_status is None:
             best_status = status
+
         if best_price is None and price is not None:
             best_price = price
+
     return best_status, best_price
 
 
-async def extract_price(page: Page, text: str, product: dict[str, Any]) -> float | None:
+async def extract_price(
+    page: Page,
+    text: str,
+    product: dict[str, Any],
+) -> float | None:
     key = retailer_key(product.get("retailer", ""), page.url)
     selectors = RETAILER_SELECTORS.get(key, {}).get("price", [])
     minimum = float(product.get("min_price", 20_000))
@@ -614,7 +704,7 @@ async def inspect_loaded_product_page(
     url = page.url or product["url"]
 
     await dismiss_popups(page)
-    await apply_pincode(page, product)
+    pincode_applied = await apply_pincode(page, product)
     await dismiss_popups(page)
     await page.wait_for_timeout(int(product.get("settle_ms", 1800)))
 
@@ -646,6 +736,34 @@ async def inspect_loaded_product_page(
 
     rkey = retailer_key(retailer, url)
     selectors = RETAILER_SELECTORS.get(rkey, {})
+
+    # FIX: Delivery unavailability overrides every other signal, including
+    # Buy Now/Add to Cart and JSON-LD availability.
+    delivery_unavailable_line = line_pattern(
+        text,
+        DELIVERY_UNAVAILABLE_PATTERNS,
+    )
+    if delivery_unavailable_line:
+        return CheckResult(
+            key,
+            retailer,
+            name,
+            StockStatus.OUT_OF_STOCK,
+            url,
+            f'Delivery unavailable for pincode {PINCODE}: '
+            f'"{delivery_unavailable_line}" ({navigation_detail})',
+            confidence="high",
+        )
+
+    delivery_confirmed_line = line_pattern(
+        text,
+        DELIVERY_AVAILABLE_PATTERNS,
+    )
+
+    # Flipkart must positively confirm delivery before Telegram can be sent.
+    require_delivery_confirmation = bool(
+        product.get("require_delivery_confirmation", rkey == "flipkart")
+    )
 
     positive = await first_visible_selector(
         page,
@@ -680,9 +798,7 @@ async def inspect_loaded_product_page(
     structured_status, structured_price = await read_json_ld(page)
     price = structured_price or await extract_price(page, text, product)
 
-    # IMPORTANT: A visible unavailable control must override all positive signals.
-    # Product pages can contain unrelated Add to Cart or Buy Now controls in
-    # recommendations, carousels, headers or hidden page sections.
+    # A visible unavailable control must override all positive stock signals.
     if negative:
         label = negative[1] or negative[0]
         return CheckResult(
@@ -696,23 +812,62 @@ async def inspect_loaded_product_page(
             confidence="high",
         )
 
-    # Only mark the product in stock when no visible unavailable control exists.
+    # Even with a purchase button, Flipkart is not considered available until
+    # a delivery message is found for the selected pincode.
+    if positive and require_delivery_confirmation and not delivery_confirmed_line:
+        pincode_note = "pincode field updated" if pincode_applied else "pincode could not be confirmed"
+        return CheckResult(
+            key,
+            retailer,
+            name,
+            StockStatus.UNKNOWN,
+            url,
+            f"Purchase control exists, but delivery to pincode {PINCODE} was "
+            f"not positively confirmed ({pincode_note}; {navigation_detail})",
+            price=price,
+        )
+
     if positive and within_price_range(price, product):
         label = positive[1] or positive[0]
+        delivery_note = (
+            f'; delivery confirmed: "{delivery_confirmed_line}"'
+            if delivery_confirmed_line
+            else ""
+        )
         return CheckResult(
             key,
             retailer,
             name,
             StockStatus.IN_STOCK,
             url,
-            f'Active purchase control detected: "{label}" ({navigation_detail})',
+            f'Active purchase control detected: "{label}"{delivery_note} '
+            f"({navigation_detail})",
             price=price,
             confidence="high",
         )
 
-    # Structured data is useful, but only after checking visible controls.
+    # JSON-LD is useful, but it cannot bypass Flipkart delivery confirmation.
     if structured_status is not None:
-        if structured_status == StockStatus.IN_STOCK and not within_price_range(price, product):
+        if (
+            structured_status == StockStatus.IN_STOCK
+            and require_delivery_confirmation
+            and not delivery_confirmed_line
+        ):
+            return CheckResult(
+                key,
+                retailer,
+                name,
+                StockStatus.UNKNOWN,
+                url,
+                f"Structured data reports stock, but delivery to pincode "
+                f"{PINCODE} was not confirmed ({navigation_detail})",
+                price=price,
+            )
+
+        if (
+            structured_status == StockStatus.IN_STOCK
+            and not within_price_range(price, product)
+        ):
             return CheckResult(
                 key,
                 retailer,
@@ -723,13 +878,15 @@ async def inspect_loaded_product_page(
                 f"outside the configured range: {format_price(price)}",
                 price=price,
             )
+
         return CheckResult(
             key,
             retailer,
             name,
             structured_status,
             url,
-            f"Availability detected from product structured data ({navigation_detail})",
+            f"Availability detected from product structured data "
+            f"({navigation_detail})",
             price=price,
             confidence="medium",
         )
@@ -742,12 +899,25 @@ async def inspect_loaded_product_page(
             name,
             StockStatus.OUT_OF_STOCK,
             url,
-            f'Unavailable text detected: "{unavailable_line}" ({navigation_detail})',
+            f'Unavailable text detected: "{unavailable_line}" '
+            f"({navigation_detail})",
             price=price,
             confidence="medium",
         )
 
     available_line = line_pattern(text, IN_STOCK_TEXT_PATTERNS)
+    if available_line and require_delivery_confirmation and not delivery_confirmed_line:
+        return CheckResult(
+            key,
+            retailer,
+            name,
+            StockStatus.UNKNOWN,
+            url,
+            f"Stock-related text was found, but delivery to pincode {PINCODE} "
+            f"was not confirmed ({navigation_detail})",
+            price=price,
+        )
+
     if available_line and within_price_range(price, product):
         return CheckResult(
             key,
@@ -755,7 +925,8 @@ async def inspect_loaded_product_page(
             name,
             StockStatus.IN_STOCK,
             url,
-            f'Availability text detected: "{available_line}" ({navigation_detail})',
+            f'Availability text detected: "{available_line}" '
+            f"({navigation_detail})",
             price=price,
             confidence="medium",
         )
@@ -773,7 +944,10 @@ async def inspect_loaded_product_page(
     )
 
 
-async def check_product_page(page: Page, product: dict[str, Any]) -> CheckResult:
+async def check_product_page(
+    page: Page,
+    product: dict[str, Any],
+) -> CheckResult:
     loaded, navigation_detail = await best_effort_goto(page, product["url"])
     if not loaded:
         return CheckResult(
@@ -785,7 +959,11 @@ async def check_product_page(page: Page, product: dict[str, Any]) -> CheckResult
             navigation_detail,
         )
 
-    result = await inspect_loaded_product_page(page, product, navigation_detail)
+    result = await inspect_loaded_product_page(
+        page,
+        product,
+        navigation_detail,
+    )
     if result.status != StockStatus.UNKNOWN:
         return result
 
@@ -800,11 +978,15 @@ async def check_product_page(page: Page, product: dict[str, Any]) -> CheckResult
         )
     except PlaywrightTimeoutError:
         pass
+
     await page.wait_for_timeout(1500)
     return await inspect_loaded_product_page(page, product, "one retry")
 
 
-async def extract_search_candidates(page: Page, product: dict[str, Any]) -> list[Match]:
+async def extract_search_candidates(
+    page: Page,
+    product: dict[str, Any],
+) -> list[Match]:
     script = """
     (anchors) => anchors.map((a) => {
       let node = a;
@@ -823,6 +1005,7 @@ async def extract_search_candidates(page: Page, product: dict[str, Any]) -> list
       };
     })
     """
+
     try:
         candidates = await page.locator("a[href]").evaluate_all(script)
     except Exception:
@@ -836,6 +1019,7 @@ async def extract_search_candidates(page: Page, product: dict[str, Any]) -> list
 
     results: list[Match] = []
     seen: set[str] = set()
+
     for candidate in candidates:
         title = clean_text(str(candidate.get("title", "")))
         context = clean_text(str(candidate.get("context", "")))
@@ -856,9 +1040,17 @@ async def extract_search_candidates(page: Page, product: dict[str, Any]) -> list
             continue
 
         seen.add(href)
-        results.append(Match(title=title or product["name"], url=href, price=price))
+        results.append(
+            Match(
+                title=title or product["name"],
+                url=href,
+                price=price,
+            )
+        )
+
         if len(results) >= max(5, MAX_SEARCH_RESULTS_TO_VERIFY):
             break
+
     return results
 
 
@@ -885,6 +1077,7 @@ async def check_search_page(
     await dismiss_popups(page)
     await page.wait_for_timeout(int(product.get("settle_ms", 2500)))
     text = await body_text(page)
+
     block = contains_pattern(text, BLOCKED_PATTERNS)
     if block:
         return CheckResult(
@@ -905,22 +1098,34 @@ async def check_search_page(
             product["name"],
             StockStatus.UNKNOWN,
             page.url or product["url"],
-            f"No verifiable console result link was found ({navigation_detail}). "
-            f"Snippet: {snippet}",
+            f"No verifiable console result link was found "
+            f"({navigation_detail}). Snippet: {snippet}",
         )
 
     verified_out = 0
     unknown_details: list[str] = []
-    for index, match in enumerate(candidates[:MAX_SEARCH_RESULTS_TO_VERIFY], start=1):
+
+    for index, match in enumerate(
+        candidates[:MAX_SEARCH_RESULTS_TO_VERIFY],
+        start=1,
+    ):
         candidate_product = dict(product)
         candidate_product["url"] = match.url
         candidate_product["name"] = match.title
         candidate_product["mode"] = "product"
-        candidate_product["apply_pincode"] = product.get("apply_pincode", False)
+
+        # FIX: Each search result opens in a new browser context, so delivery
+        # pincode must be applied again. The old default was False.
+        candidate_product["apply_pincode"] = product.get("apply_pincode", True)
+        candidate_product["require_delivery_confirmation"] = product.get(
+            "require_delivery_confirmation",
+            retailer_key(product.get("retailer", ""), match.url) == "flipkart",
+        )
 
         context = await make_context(browser)
         candidate_page = await context.new_page()
         candidate_page.set_default_timeout(8000)
+
         try:
             result = await check_product_page(candidate_page, candidate_product)
         finally:
@@ -932,20 +1137,22 @@ async def check_search_page(
             result.matches = [match]
             result.detail = f"Verified result {index}: {result.detail}"
             return result
+
         if result.status == StockStatus.OUT_OF_STOCK:
             verified_out += 1
         else:
-            unknown_details.append(result.detail[:120])
+            unknown_details.append(result.detail[:160])
 
-    if verified_out == min(len(candidates), MAX_SEARCH_RESULTS_TO_VERIFY):
+    checked_count = min(len(candidates), MAX_SEARCH_RESULTS_TO_VERIFY)
+    if verified_out == checked_count:
         return CheckResult(
             product["key"],
             product["retailer"],
             product["name"],
             StockStatus.OUT_OF_STOCK,
             page.url or product["url"],
-            f"Checked {verified_out} matching console result(s); "
-            "none had an active purchase signal",
+            f"Checked {verified_out} matching console result(s); none were "
+            f"both purchasable and deliverable to pincode {PINCODE}",
             confidence="medium",
         )
 
@@ -955,14 +1162,15 @@ async def check_search_page(
         product["name"],
         StockStatus.UNKNOWN,
         page.url or product["url"],
-        "Matching console results were found, but they could not all be verified: "
-        + " | ".join(unknown_details[:2]),
+        "Matching console results were found, but they could not all be "
+        "verified: " + " | ".join(unknown_details[:2]),
     )
 
 
 async def send_telegram(message: str) -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
     if not token or not chat_id:
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured "
@@ -976,6 +1184,7 @@ async def send_telegram(message: str) -> None:
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
+
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(endpoint, json=payload)
         response.raise_for_status()
@@ -990,6 +1199,7 @@ def build_stock_message(result: CheckResult) -> str:
         "",
         f"<b>{html.escape(result.name)}</b>",
         f"Store: <b>{html.escape(result.retailer)}</b>",
+        f"Delivery pincode: <b>{html.escape(PINCODE)}</b>",
         f"Price: <b>{html.escape(format_price(result.price))}</b>",
         f"Confidence: {html.escape(result.confidence)}",
         f'<a href="{html.escape(result.url, quote=True)}">Open product page</a>',
@@ -1022,11 +1232,14 @@ async def make_context(browser: Browser) -> BrowserContext:
         locale="en-IN",
         timezone_id="Asia/Kolkata",
         viewport={"width": 1440, "height": 1000},
-        extra_http_headers={"Accept-Language": "en-IN,en;q=0.9", "DNT": "1"},
+        extra_http_headers={
+            "Accept-Language": "en-IN,en;q=0.9",
+            "DNT": "1",
+        },
     )
 
-    # Images, videos and fonts are not needed for stock detection and often
-    # cause retail pages to exceed the GitHub Actions navigation timeout.
+    # Images, videos and fonts are unnecessary for stock detection and can
+    # cause retail pages to exceed GitHub Actions navigation timeouts.
     async def route_handler(route: Any) -> None:
         if route.request.resource_type in {"image", "media", "font"}:
             await route.abort()
@@ -1037,7 +1250,9 @@ async def make_context(browser: Browser) -> BrowserContext:
     return context
 
 
-async def run_checks(products: list[dict[str, Any]]) -> list[CheckResult]:
+async def run_checks(
+    products: list[dict[str, Any]],
+) -> list[CheckResult]:
     results: list[CheckResult] = []
 
     async with async_playwright() as playwright:
@@ -1045,6 +1260,7 @@ async def run_checks(products: list[dict[str, Any]]) -> list[CheckResult]:
             headless=HEADLESS,
             args=["--disable-dev-shm-usage", "--no-sandbox"],
         )
+
         try:
             for product in products:
                 if not product.get("enabled", True):
@@ -1055,6 +1271,7 @@ async def run_checks(products: list[dict[str, Any]]) -> list[CheckResult]:
                 page.set_default_timeout(8000)
 
                 print(f"\nChecking {product['retailer']} — {product['name']}")
+
                 try:
                     if str(product.get("mode", "product")).lower() == "search":
                         result = await check_search_page(browser, page, product)
@@ -1077,7 +1294,9 @@ async def run_checks(products: list[dict[str, Any]]) -> list[CheckResult]:
                     f"{format_price(result.price)}; {result.url}"
                 )
                 results.append(result)
-                await asyncio.sleep(float(product.get("delay_after_seconds", 1.0)))
+                await asyncio.sleep(
+                    float(product.get("delay_after_seconds", 1.0))
+                )
         finally:
             await browser.close()
 
@@ -1086,7 +1305,12 @@ async def run_checks(products: list[dict[str, Any]]) -> list[CheckResult]:
 
 async def async_main() -> int:
     products_data = load_json(PRODUCTS_FILE, {})
-    products = products_data.get("products", []) if isinstance(products_data, dict) else []
+    products = (
+        products_data.get("products", [])
+        if isinstance(products_data, dict)
+        else []
+    )
+
     if not products:
         print("No products are enabled in products.json", file=sys.stderr)
         return 2
@@ -1112,7 +1336,7 @@ async def async_main() -> int:
         previous_fingerprint = previous.get("last_alerted_fingerprint")
         current_fingerprint = fingerprint(result)
 
-        # An uncertain page must not overwrite a known state or trigger alerts.
+        # UNKNOWN never triggers Telegram and never overwrites a known state.
         if result.status == StockStatus.UNKNOWN:
             continue
 
@@ -1161,9 +1385,16 @@ async def async_main() -> int:
     changed = save_json_if_changed(STATE_FILE, state)
     print(f"\nState file changed: {changed}")
 
-    in_stock = sum(result.status == StockStatus.IN_STOCK for result in results)
-    out_stock = sum(result.status == StockStatus.OUT_OF_STOCK for result in results)
-    unknown = sum(result.status == StockStatus.UNKNOWN for result in results)
+    in_stock = sum(
+        result.status == StockStatus.IN_STOCK for result in results
+    )
+    out_stock = sum(
+        result.status == StockStatus.OUT_OF_STOCK for result in results
+    )
+    unknown = sum(
+        result.status == StockStatus.UNKNOWN for result in results
+    )
+
     print(
         f"Summary: {in_stock} in stock, "
         f"{out_stock} out of stock, {unknown} unknown"
