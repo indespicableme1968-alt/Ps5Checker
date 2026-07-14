@@ -6,9 +6,10 @@ configured delivery pincode where possible, and sends Telegram alerts only
 when the product has a reliable purchase signal.
 
 Important Flipkart rule:
-A Flipkart product is never marked IN_STOCK unless delivery to the configured
-pincode is positively confirmed. Text such as "Not deliverable at your
-location" overrides Buy Now/Add to Cart buttons and structured stock data.
+A Flipkart product is never marked IN_STOCK unless the configured pincode is
+applied and delivery is positively confirmed. Text such as "Not deliverable at
+your location" overrides Buy Now/Add to Cart buttons and structured stock data.
+Flipkart JSON-LD/structured data alone can never trigger a Telegram alert.
 """
 
 from __future__ import annotations
@@ -508,10 +509,17 @@ async def set_generic_pincode(page: Page, pincode: str) -> bool:
 
 
 async def apply_pincode(page: Page, product: dict[str, Any]) -> bool:
-    if not product.get("apply_pincode", True) or not PINCODE:
+    key = retailer_key(product.get("retailer", ""), product.get("url", ""))
+
+    if not PINCODE:
         return False
 
-    key = retailer_key(product.get("retailer", ""), product.get("url", ""))
+    # Flipkart delivery verification is mandatory. A products.json setting must
+    # never disable it, because seller-level stock does not prove that the item
+    # can be delivered to the configured pincode.
+    if key != "flipkart" and not product.get("apply_pincode", True):
+        return False
+
     pincode = str(product.get("pincode") or PINCODE)
 
     if key == "amazon":
@@ -760,9 +768,15 @@ async def inspect_loaded_product_page(
         DELIVERY_AVAILABLE_PATTERNS,
     )
 
-    # Flipkart must positively confirm delivery before Telegram can be sent.
-    require_delivery_confirmation = bool(
-        product.get("require_delivery_confirmation", rkey == "flipkart")
+    # Flipkart must always confirm both the configured pincode interaction and
+    # a positive delivery message. This cannot be disabled in products.json.
+    require_delivery_confirmation = (
+        rkey == "flipkart"
+        or bool(product.get("require_delivery_confirmation", False))
+    )
+    delivery_verified = bool(
+        delivery_confirmed_line
+        and (pincode_applied or PINCODE in compact)
     )
 
     positive = await first_visible_selector(
@@ -814,7 +828,7 @@ async def inspect_loaded_product_page(
 
     # Even with a purchase button, Flipkart is not considered available until
     # a delivery message is found for the selected pincode.
-    if positive and require_delivery_confirmation and not delivery_confirmed_line:
+    if positive and require_delivery_confirmation and not delivery_verified:
         pincode_note = "pincode field updated" if pincode_applied else "pincode could not be confirmed"
         return CheckResult(
             key,
@@ -830,8 +844,9 @@ async def inspect_loaded_product_page(
     if positive and within_price_range(price, product):
         label = positive[1] or positive[0]
         delivery_note = (
-            f'; delivery confirmed: "{delivery_confirmed_line}"'
-            if delivery_confirmed_line
+            f'; delivery confirmed for pincode {PINCODE}: '
+            f'"{delivery_confirmed_line}"'
+            if delivery_verified
             else ""
         )
         return CheckResult(
@@ -851,7 +866,7 @@ async def inspect_loaded_product_page(
         if (
             structured_status == StockStatus.IN_STOCK
             and require_delivery_confirmation
-            and not delivery_confirmed_line
+            and not delivery_verified
         ):
             return CheckResult(
                 key,
@@ -906,7 +921,7 @@ async def inspect_loaded_product_page(
         )
 
     available_line = line_pattern(text, IN_STOCK_TEXT_PATTERNS)
-    if available_line and require_delivery_confirmation and not delivery_confirmed_line:
+    if available_line and require_delivery_confirmation and not delivery_verified:
         return CheckResult(
             key,
             retailer,
@@ -1116,10 +1131,17 @@ async def check_search_page(
 
         # FIX: Each search result opens in a new browser context, so delivery
         # pincode must be applied again. The old default was False.
-        candidate_product["apply_pincode"] = product.get("apply_pincode", True)
-        candidate_product["require_delivery_confirmation"] = product.get(
-            "require_delivery_confirmation",
-            retailer_key(product.get("retailer", ""), match.url) == "flipkart",
+        candidate_retailer_key = retailer_key(
+            product.get("retailer", ""), match.url
+        )
+        candidate_product["apply_pincode"] = (
+            True
+            if candidate_retailer_key == "flipkart"
+            else product.get("apply_pincode", True)
+        )
+        candidate_product["require_delivery_confirmation"] = (
+            candidate_retailer_key == "flipkart"
+            or bool(product.get("require_delivery_confirmation", False))
         )
 
         context = await make_context(browser)
