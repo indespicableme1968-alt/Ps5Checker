@@ -1,6 +1,7 @@
 {
   "amazon-digital": {
-    "status": "OUT_OF_STOCK",
+    "last_alerted_fingerprint": "IN_STOCK|https://www.amazon.in/dp/B0CY5QW186",
+    "status": "IN_STOCK",
     "url": "https://www.amazon.in/dp/B0CY5QW186"
   },
   "amazon-disc": {
